@@ -20,8 +20,8 @@ function Initialize-Window
 
     try 
     {
-        [xml]$xaml = Get-Content $xamlFile
-        [xml]$styles = Get-Content ($global:AppRootFolder + "\Themes\Styles.xaml")
+        [xml]$xaml = Get-Content (Resolve-CustomFilePath $xamlFile)
+        [xml]$styles = Get-Content (Resolve-CustomFilePath ($global:AppRootFolder + "\Themes\Styles.xaml"))
 
         ### Update relative path to full path for ResourceDictionary
         [System.Xml.XmlNamespaceManager] $nsm = $xaml.NameTable;
@@ -65,9 +65,11 @@ function Start-CoreApp
     $script:LogItems = [System.Collections.ObjectModel.ObservableCollection[object]]::new()
 
     $global:AppRootFolder = $PSScriptRoot
+    $global:CustomRootFolder = Join-Path $global:AppRootFolder "Custom"
 
     # Load all modules in the Modules folder
     $global:modulesPath = [IO.Path]::GetDirectoryName($PSCommandPath) + "\Extensions"
+    $global:customModulesPath = Join-Path $global:CustomRootFolder "Extensions"
 
     Add-DefaultSettings
 
@@ -199,11 +201,25 @@ function Start-RunSilentBatchJob
 
 function Import-AllModules
 {
-    foreach($file in (Get-Item -path "$($global:modulesPath)\*.psm1"))
+    Import-ModuleFolder $global:modulesPath
+
+    if(Test-Path $global:customModulesPath)
     {      
-        $fileName = [IO.Path]::GetFileName($file) 
+        Import-ModuleFolder $global:customModulesPath
+    }
+}
+
+function Import-ModuleFolder
+{
+    param($folderPath)
+
+    if(-not (Test-Path $folderPath)) { return }
+
+    foreach($file in (Get-Item -Path "$folderPath\*.psm1"))
+    {
+        $fileName = [IO.Path]::GetFileName($file)
         if($skipModules -contains $fileName) { Write-Warning "Module $fileName excluded"; continue; }
-    
+
         Set-SplashWindowText "Import module $fileName"
         [System.Windows.Forms.Application]::DoEvents()
 
@@ -495,11 +511,13 @@ function Get-XamlObject
 {
     param($fileName, [switch]$AddVariables)
 
-    if(([IO.File]::Exists($fileName)))
+    $resolvedFileName = Resolve-CustomFilePath $fileName
+
+    if(([IO.File]::Exists($resolvedFileName)))
     {
         try 
         {
-            [xml]$xaml = Get-Content $fileName
+            [xml]$xaml = Get-Content $resolvedFileName
             
             $xamlObj = ([Windows.Markup.XamlReader]::Load((New-Object System.Xml.XmlNodeReader $xaml)))
 
@@ -516,8 +534,39 @@ function Get-XamlObject
     }
     else
     {
-        Write-Log "Failed to open Xaml file. File not found: $fileName"
+        Write-Log "Failed to open Xaml file. File not found: $resolvedFileName"
     }
+}
+
+function Resolve-CustomFilePath
+{
+    param($filePath)
+
+    if(-not $filePath) { return $filePath }
+    if(-not $global:CustomRootFolder -or -not (Test-Path $global:CustomRootFolder)) { return $filePath }
+
+    try
+    {
+        $basePath = [IO.Path]::GetFullPath($global:AppRootFolder)
+        $fullPath = [IO.Path]::GetFullPath($filePath)
+        if(-not $fullPath.StartsWith($basePath, [System.StringComparison]::OrdinalIgnoreCase))
+        {
+            return $filePath
+        }
+
+        $relativePath = $fullPath.Substring($basePath.Length).TrimStart('\','/')
+        $customPath = Join-Path $global:CustomRootFolder $relativePath
+        if(Test-Path $customPath)
+        {
+            return $customPath
+        }
+    }
+    catch
+    {
+        Write-LogError "Failed to resolve custom file path $filePath" $_.Exception
+    }
+
+    $filePath
 }
 
 function Invoke-RegisterName
@@ -2388,7 +2437,12 @@ function Show-ViewMenu
         $viewItems = $viewItems | Where { $_."@HasPermissions" -ne $false }
     }
 
+    $global:ViewMenuItems = @($viewItems)
+    Invoke-ModuleFunction "Invoke-UpdateViewMenuItems"
+    $viewItems = @($global:ViewMenuItems)
+
     $lstMenuItems.ItemsSource = @($viewItems)
+    Invoke-ModuleFunction "Invoke-AfterShowViewMenu"
 }
 
 #endregion
@@ -2407,8 +2461,8 @@ function Get-MainWindow
 {
     try 
     {
-        [xml]$xaml = Get-Content ($global:AppRootFolder + "\Xaml\MainWindow.xaml")
-        [xml]$styles = Get-Content ($global:AppRootFolder + "\Themes\Styles.xaml")
+        [xml]$xaml = Get-Content (Resolve-CustomFilePath ($global:AppRootFolder + "\Xaml\MainWindow.xaml"))
+        [xml]$styles = Get-Content (Resolve-CustomFilePath ($global:AppRootFolder + "\Themes\Styles.xaml"))
 
         ### Update relative path to full path for ResourceDictionary
         [System.Xml.XmlNamespaceManager] $nsm = $xaml.NameTable;
@@ -2454,6 +2508,8 @@ function Get-MainWindow
             & $global:currentViewObject.ViewInfo.ItemChanged
         }
     })
+
+    Invoke-ModuleFunction "Invoke-AfterMainWindowCreated"
 
     $global:grdPopup.add_MouseLeftButtonDown( { Hide-Popup } )
   

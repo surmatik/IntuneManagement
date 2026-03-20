@@ -4261,6 +4261,8 @@ function Show-GraphObjectInfo
     
     Show-ObjectDefaultColumnsSettings
 
+    Invoke-ModuleFunction "Invoke-AfterGraphObjectDetailsCreated" @($script:detailsForm, $global:dgObjects.SelectedItem, $global:curObjectType)
+
     # Show dialog
     Show-ModalForm $FormTitle $detailsForm
 }

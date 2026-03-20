@@ -3,6 +3,8 @@
 .git/
 /*.Log
 /*.Lo_
+/*.log
+/*.lo_
 /*.csv
 /*.zip
 /*.new
@@ -10,3 +12,4 @@
 /Extensions/*.zip
 .gitignore
 CloudAPIPowerShellManagement.log
+CloudAPIPowerShellManagement.lo_
