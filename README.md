@@ -1,3 +1,11 @@
+# IntuneManagement - Custom Extensions in This Fork
+
+This fork adds three custom organization-specific extensions on top of the original project:
+
+* **Configuration Profile Assignments Editor**: Adds a dedicated Assignments dialog for Settings Catalog, Device Configuration and Administrative Templates so assignments can be viewed and updated directly from the app.
+* **Menu Favorites**: Adds persistent favorites in the left navigation so frequently used areas can be pinned and shown in a separate favorites section.
+* **Menu Search**: Adds a search box for the left navigation to quickly find menu entries while keeping favorites visible.
+
 # IntuneManagement with PowerShell and WPF UI
 
 <p align="center">
