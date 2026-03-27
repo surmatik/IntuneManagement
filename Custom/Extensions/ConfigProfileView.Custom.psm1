@@ -2,7 +2,7 @@ function Get-ConfigProfileViewSupported
 {
     param($objectType)
 
-    $objectType -and $objectType.Id -in @("SettingsCatalog", "DeviceConfiguration", "AdministrativeTemplates", "PowerShellScripts")
+    $objectType -and $objectType.Id -in @("SettingsCatalog", "DeviceConfiguration", "AdministrativeTemplates", "PowerShellScripts", "ConditionalAccess")
 }
 
 function New-ConfigProfileViewTab
@@ -458,6 +458,713 @@ function Get-ConfigProfileViewEntriesForAdministrativeTemplates
     $entries
 }
 
+function Get-ConfigProfileViewResolvedName
+{
+    param(
+        [string]$Type,
+        [string]$Id
+    )
+
+    if(-not $Id)
+    {
+        return ""
+    }
+
+    if(-not $script:ConfigProfileViewNameCache)
+    {
+        $script:ConfigProfileViewNameCache = @{}
+    }
+
+    $cacheKey = "$Type|$Id"
+    if($script:ConfigProfileViewNameCache.ContainsKey($cacheKey))
+    {
+        return $script:ConfigProfileViewNameCache[$cacheKey]
+    }
+
+    $resolvedName = $Id
+    try
+    {
+        switch ($Type)
+        {
+            'User'
+            {
+                $user = Invoke-GraphRequest -Url "/users/$Id?`$select=id,displayName,userPrincipalName" -ODataMetadata "minimal" -NoError
+                if($user)
+                {
+                    $resolvedName = ?? $user.userPrincipalName $user.displayName $Id
+                }
+            }
+            'Group'
+            {
+                $group = Invoke-GraphRequest -Url "/groups/$Id?`$select=id,displayName" -ODataMetadata "minimal" -NoError
+                if($group.displayName)
+                {
+                    $resolvedName = $group.displayName
+                }
+            }
+            'Application'
+            {
+                $appResponse = Invoke-GraphRequest -Url "/applications?`$filter=appId eq '$Id'&`$select=id,appId,displayName&`$top=1" -ODataMetadata "minimal" -NoError
+                $app = @($appResponse.value)[0]
+                if($app.displayName)
+                {
+                    $resolvedName = $app.displayName
+                }
+            }
+            'NamedLocation'
+            {
+                $location = Invoke-GraphRequest -Url "/identity/conditionalAccess/namedLocations/$Id?`$select=id,displayName" -ODataMetadata "minimal" -NoError
+                if($location.displayName)
+                {
+                    $resolvedName = $location.displayName
+                }
+            }
+            'TermsOfUse'
+            {
+                $tou = Invoke-GraphRequest -Url "/identityGovernance/termsOfUse/agreements/$Id?`$select=id,displayName" -ODataMetadata "minimal" -NoError
+                if($tou.displayName)
+                {
+                    $resolvedName = $tou.displayName
+                }
+            }
+            'AuthenticationStrength'
+            {
+                $strength = Invoke-GraphRequest -Url "/identity/conditionalAccess/authenticationStrength/policies/$Id?`$select=id,displayName" -ODataMetadata "minimal" -NoError
+                if($strength.displayName)
+                {
+                    $resolvedName = $strength.displayName
+                }
+            }
+        }
+
+        if($resolvedName -eq $Id)
+        {
+            $typeMap = @{
+                User  = 'user'
+                Group = 'group'
+            }
+
+            $body = @{
+                ids = @($Id)
+            }
+
+            if($typeMap.ContainsKey($Type))
+            {
+                $body.types = @($typeMap[$Type])
+            }
+
+            $directoryObjectResponse = Invoke-GraphRequest -Url "/directoryObjects/getByIds" -HttpMethod "POST" -Content ($body | ConvertTo-Json -Depth 5) -ODataMetadata "minimal" -NoError
+            $directoryObject = @($directoryObjectResponse.value)[0]
+            if($directoryObject)
+            {
+                $resolvedName = ?? $directoryObject.userPrincipalName $directoryObject.displayName $directoryObject.appDisplayName $Id
+            }
+        }
+    }
+    catch
+    {
+        Write-Log "Config profile view: failed to resolve $Type '$Id'. $($_.Exception.Message)" 2
+    }
+
+    $script:ConfigProfileViewNameCache[$cacheKey] = $resolvedName
+    $resolvedName
+}
+
+function Get-ConfigProfileViewRoleName
+{
+    param([string]$Id)
+
+    if(-not $Id)
+    {
+        return ""
+    }
+
+    if(-not $script:ConfigProfileViewRoleCache)
+    {
+        $script:ConfigProfileViewRoleCache = @{}
+        $roleTemplates = (Invoke-GraphRequest -Url "/directoryRoleTemplates?`$select=id,displayName" -ODataMetadata "minimal" -NoError).value
+        foreach($roleTemplate in @($roleTemplates))
+        {
+            if($roleTemplate.id)
+            {
+                $script:ConfigProfileViewRoleCache[$roleTemplate.id] = ?? $roleTemplate.displayName $roleTemplate.id
+            }
+        }
+    }
+
+    ?? $script:ConfigProfileViewRoleCache[$Id] $Id
+}
+
+function ConvertTo-ConfigProfileViewJoinedLines
+{
+    param($Values)
+
+    @($Values | Where-Object { $_ -ne $null -and $_ -ne "" }) -join [Environment]::NewLine
+}
+
+function ConvertTo-ConfigProfileViewConditionalAccessToken
+{
+    param(
+        [string]$Token,
+        [string]$Context
+    )
+
+    switch ($Token)
+    {
+        'All' { return 'All users' }
+        'None' { return 'None' }
+        'GuestsOrExternalUsers' { return 'Guests or external users' }
+        'ServicePrincipalsInMyTenant' { return 'Service principals in this tenant' }
+        'AllTrusted' { return 'All trusted locations' }
+        'AllCompliantDevice' { return 'All compliant devices' }
+        'All' { return 'All cloud apps' }
+    }
+
+    switch ($Context)
+    {
+        'State'
+        {
+            switch ($Token)
+            {
+                'enabled' { return 'On' }
+                'disabled' { return 'Off' }
+                'enabledForReportingButNotEnforced' { return 'Report-only' }
+            }
+        }
+        'GrantControl'
+        {
+            switch ($Token)
+            {
+                'mfa' { return 'Require multifactor authentication' }
+                'compliantDevice' { return 'Require device to be marked as compliant' }
+                'domainJoinedDevice' { return 'Require Microsoft Entra hybrid joined device' }
+                'approvedApplication' { return 'Require approved client app' }
+                'compliantApplication' { return 'Require app protection policy' }
+                'passwordChange' { return 'Require password change' }
+                'block' { return 'Block access' }
+            }
+        }
+        'ClientApp'
+        {
+            switch ($Token)
+            {
+                'all' { return 'All client app types' }
+                'browser' { return 'Browser' }
+                'mobileAppsAndDesktopClients' { return 'Mobile apps and desktop clients' }
+                'exchangeActiveSync' { return 'Exchange ActiveSync clients' }
+                'other' { return 'Other clients' }
+            }
+        }
+    }
+
+    $Token
+}
+
+function Get-ConfigProfileViewEntriesForConditionalAccess
+{
+    param($obj)
+
+    $entries = @()
+
+    $entries += (New-ConfigProfileViewEntry -Category 'General' -SubCategory '' -Name 'State' -Value (ConvertTo-ConfigProfileViewConditionalAccessToken $obj.state 'State'))
+
+    $includeUsers = @()
+    foreach($id in @($obj.conditions.users.includeUsers))
+    {
+        if($id -in @('All', 'None', 'GuestsOrExternalUsers'))
+        {
+            $includeUsers += (ConvertTo-ConfigProfileViewConditionalAccessToken $id 'Users')
+        }
+        else
+        {
+            $includeUsers += (Get-ConfigProfileViewResolvedName 'User' $id)
+        }
+    }
+    foreach($id in @($obj.conditions.users.includeGroups))
+    {
+        $includeUsers += (Get-ConfigProfileViewResolvedName 'Group' $id)
+    }
+    if(@($obj.conditions.users.includeRoles).Count -gt 0)
+    {
+        $includeUsers += @($obj.conditions.users.includeRoles | ForEach-Object { "Role: $(Get-ConfigProfileViewRoleName $_)" })
+    }
+    if($includeUsers)
+    {
+        $entries += (New-ConfigProfileViewEntry -Category 'Assignments' -SubCategory 'Users or agents (Preview)' -Name 'Included users, groups or roles' -Value (ConvertTo-ConfigProfileViewJoinedLines $includeUsers))
+    }
+
+    $excludeUsers = @()
+    foreach($id in @($obj.conditions.users.excludeUsers))
+    {
+        if($id -eq 'GuestsOrExternalUsers')
+        {
+            $excludeUsers += (ConvertTo-ConfigProfileViewConditionalAccessToken $id 'Users')
+        }
+        else
+        {
+            $excludeUsers += (Get-ConfigProfileViewResolvedName 'User' $id)
+        }
+    }
+    foreach($id in @($obj.conditions.users.excludeGroups))
+    {
+        $excludeUsers += (Get-ConfigProfileViewResolvedName 'Group' $id)
+    }
+    if(@($obj.conditions.users.excludeRoles).Count -gt 0)
+    {
+        $excludeUsers += @($obj.conditions.users.excludeRoles | ForEach-Object { "Role: $(Get-ConfigProfileViewRoleName $_)" })
+    }
+    if($excludeUsers)
+    {
+        $entries += (New-ConfigProfileViewEntry -Category 'Assignments' -SubCategory 'Users or agents (Preview)' -Name 'Excluded users, groups or roles' -Value (ConvertTo-ConfigProfileViewJoinedLines $excludeUsers))
+    }
+
+    $includeApps = @()
+    foreach($id in @($obj.conditions.applications.includeApplications))
+    {
+        if($id -eq 'All')
+        {
+            $includeApps += 'All cloud apps'
+        }
+        else
+        {
+            $includeApps += (Get-ConfigProfileViewResolvedName 'Application' $id)
+        }
+    }
+    if($includeApps)
+    {
+        $entries += (New-ConfigProfileViewEntry -Category 'Target resources' -SubCategory 'Cloud apps or actions' -Name 'Included applications' -Value (ConvertTo-ConfigProfileViewJoinedLines $includeApps))
+    }
+
+    $excludeApps = @()
+    foreach($id in @($obj.conditions.applications.excludeApplications))
+    {
+        if($id -eq 'None')
+        {
+            $excludeApps += 'None'
+        }
+        else
+        {
+            $excludeApps += (Get-ConfigProfileViewResolvedName 'Application' $id)
+        }
+    }
+    if($excludeApps)
+    {
+        $entries += (New-ConfigProfileViewEntry -Category 'Target resources' -SubCategory 'Cloud apps or actions' -Name 'Excluded applications' -Value (ConvertTo-ConfigProfileViewJoinedLines $excludeApps))
+    }
+
+    if(@($obj.conditions.applications.includeUserActions).Count -gt 0)
+    {
+        $entries += (New-ConfigProfileViewEntry -Category 'Target resources' -SubCategory 'Cloud apps or actions' -Name 'User actions' -Value (ConvertTo-ConfigProfileViewJoinedLines $obj.conditions.applications.includeUserActions))
+    }
+
+    if(@($obj.conditions.applications.includeAuthenticationContextClassReferences).Count -gt 0)
+    {
+        $entries += (New-ConfigProfileViewEntry -Category 'Target resources' -SubCategory 'Cloud apps or actions' -Name 'Authentication context' -Value (ConvertTo-ConfigProfileViewJoinedLines $obj.conditions.applications.includeAuthenticationContextClassReferences))
+    }
+
+    if(@($obj.conditions.userRiskLevels).Count -gt 0)
+    {
+        $entries += (New-ConfigProfileViewEntry -Category 'Conditions' -SubCategory '' -Name 'User risk' -Value (ConvertTo-ConfigProfileViewJoinedLines $obj.conditions.userRiskLevels))
+    }
+
+    if(@($obj.conditions.signInRiskLevels).Count -gt 0)
+    {
+        $entries += (New-ConfigProfileViewEntry -Category 'Conditions' -SubCategory '' -Name 'Sign-in risk' -Value (ConvertTo-ConfigProfileViewJoinedLines $obj.conditions.signInRiskLevels))
+    }
+
+    if(@($obj.conditions.platforms.includePlatforms).Count -gt 0)
+    {
+        $entries += (New-ConfigProfileViewEntry -Category 'Conditions' -SubCategory '' -Name 'Include platforms' -Value (ConvertTo-ConfigProfileViewJoinedLines $obj.conditions.platforms.includePlatforms))
+    }
+
+    if(@($obj.conditions.platforms.excludePlatforms).Count -gt 0)
+    {
+        $entries += (New-ConfigProfileViewEntry -Category 'Conditions' -SubCategory '' -Name 'Exclude platforms' -Value (ConvertTo-ConfigProfileViewJoinedLines $obj.conditions.platforms.excludePlatforms))
+    }
+
+    $includeLocations = foreach($id in @($obj.conditions.locations.includeLocations))
+    {
+        if($id -eq 'All') { 'Any location' }
+        elseif($id -eq 'AllTrusted') { 'All trusted locations' }
+        else { Get-ConfigProfileViewResolvedName 'NamedLocation' $id }
+    }
+    if($includeLocations)
+    {
+        $entries += (New-ConfigProfileViewEntry -Category 'Network' -SubCategory 'Locations' -Name 'Included locations' -Value (ConvertTo-ConfigProfileViewJoinedLines $includeLocations))
+    }
+
+    $excludeLocations = foreach($id in @($obj.conditions.locations.excludeLocations))
+    {
+        if($id -eq 'AllTrusted') { 'All trusted locations' }
+        else { Get-ConfigProfileViewResolvedName 'NamedLocation' $id }
+    }
+    if($excludeLocations)
+    {
+        $entries += (New-ConfigProfileViewEntry -Category 'Network' -SubCategory 'Locations' -Name 'Excluded locations' -Value (ConvertTo-ConfigProfileViewJoinedLines $excludeLocations))
+    }
+
+    if(@($obj.conditions.clientAppTypes).Count -gt 0)
+    {
+        $entries += (New-ConfigProfileViewEntry -Category 'Conditions' -SubCategory '' -Name 'Client app types' -Value (ConvertTo-ConfigProfileViewJoinedLines (@($obj.conditions.clientAppTypes | ForEach-Object { ConvertTo-ConfigProfileViewConditionalAccessToken $_ 'ClientApp' }))))
+    }
+
+    if($obj.conditions.devices.deviceFilter)
+    {
+        $entries += (New-ConfigProfileViewEntry -Category 'Conditions' -SubCategory '' -Name 'Device filter' -Value "$($obj.conditions.devices.deviceFilter.mode): $($obj.conditions.devices.deviceFilter.rule)")
+    }
+
+    $grantControls = @()
+    foreach($control in @($obj.grantControls.builtInControls))
+    {
+        $grantControls += (ConvertTo-ConfigProfileViewConditionalAccessToken $control 'GrantControl')
+    }
+    foreach($id in @($obj.grantControls.termsOfUse))
+    {
+        $grantControls += ("Terms of use: " + (Get-ConfigProfileViewResolvedName 'TermsOfUse' $id))
+    }
+    if($obj.grantControls.authenticationStrength)
+    {
+        $strengthId = ?? $obj.grantControls.authenticationStrength.id $obj.grantControls.authenticationStrength.policyId
+        if($strengthId)
+        {
+            $grantControls += ("Authentication strength: " + (Get-ConfigProfileViewResolvedName 'AuthenticationStrength' $strengthId))
+        }
+        elseif($obj.grantControls.authenticationStrength.displayName)
+        {
+            $grantControls += ("Authentication strength: " + $obj.grantControls.authenticationStrength.displayName)
+        }
+    }
+    if(@($obj.grantControls.customAuthenticationFactors).Count -gt 0)
+    {
+        $grantControls += ("Custom authentication factors: " + (ConvertTo-ConfigProfileViewJoinedLines $obj.grantControls.customAuthenticationFactors))
+    }
+    if($grantControls)
+    {
+        $entries += (New-ConfigProfileViewEntry -Category 'Access controls' -SubCategory 'Grant' -Name 'Requirements' -Value (ConvertTo-ConfigProfileViewJoinedLines $grantControls))
+    }
+    if($obj.grantControls.operator)
+    {
+        $entries += (New-ConfigProfileViewEntry -Category 'Access controls' -SubCategory 'Grant' -Name 'Operator' -Value $obj.grantControls.operator)
+    }
+
+    if($obj.sessionControls.applicationEnforcedRestrictions.isEnabled -eq $true)
+    {
+        $entries += (New-ConfigProfileViewEntry -Category 'Access controls' -SubCategory 'Session' -Name 'Use app enforced restrictions' -Value 'Enabled')
+    }
+    if($obj.sessionControls.cloudAppSecurity.isEnabled -eq $true)
+    {
+        $entries += (New-ConfigProfileViewEntry -Category 'Access controls' -SubCategory 'Session' -Name 'Use Conditional Access App Control' -Value $obj.sessionControls.cloudAppSecurity.cloudAppSecurityType)
+    }
+    if($obj.sessionControls.signInFrequency.isEnabled -eq $true)
+    {
+        $frequencyValue = "$($obj.sessionControls.signInFrequency.value) $($obj.sessionControls.signInFrequency.type)"
+        $entries += (New-ConfigProfileViewEntry -Category 'Access controls' -SubCategory 'Session' -Name 'Sign-in frequency' -Value $frequencyValue)
+    }
+    if($obj.sessionControls.continuousAccessEvaluation)
+    {
+        $entries += (New-ConfigProfileViewEntry -Category 'Access controls' -SubCategory 'Session' -Name 'Continuous access evaluation' -Value $obj.sessionControls.continuousAccessEvaluation.mode)
+    }
+    if($obj.sessionControls.persistentBrowser.isEnabled -eq $true)
+    {
+        $entries += (New-ConfigProfileViewEntry -Category 'Access controls' -SubCategory 'Session' -Name 'Persistent browser session' -Value $obj.sessionControls.persistentBrowser.mode)
+    }
+
+    $entries
+}
+
+function Add-ConfigProfileViewSeparator
+{
+    param($panel)
+
+    $separator = New-Object Windows.Shapes.Rectangle
+    $separator.Height = 1
+    $separator.Fill = '#D9D9D9'
+    $separator.Margin = '0,8,0,10'
+    [void]$panel.Children.Add($separator)
+}
+
+function Add-ConfigProfileViewSummaryText
+{
+    param(
+        $panel,
+        [string]$Title,
+        [string]$Value,
+        [switch]$Subtle
+    )
+
+    $titleBlock = New-Object Windows.Controls.TextBlock
+    $titleBlock.Text = $Title
+    $titleBlock.FontSize = 14
+    $titleBlock.Margin = '0,0,0,3'
+    [void]$panel.Children.Add($titleBlock)
+
+    $valueBlock = New-Object Windows.Controls.TextBlock
+    $valueBlock.Text = $Value
+    $valueBlock.TextWrapping = 'Wrap'
+    $valueBlock.FontSize = 15
+    $valueBlock.Foreground = if($Subtle) { '#444444' } else { '#0F6CBD' }
+    $valueBlock.Margin = '8,0,0,0'
+    [void]$panel.Children.Add($valueBlock)
+}
+
+function Add-ConfigProfileViewConditionalAccessEntryBlock
+{
+    param(
+        $panel,
+        $entry
+    )
+
+    $nameBlock = New-Object Windows.Controls.TextBlock
+    $nameBlock.Text = $entry.Name
+    $nameBlock.FontSize = 13
+    $nameBlock.Margin = '0,0,0,2'
+    $nameBlock.TextWrapping = 'Wrap'
+    [void]$panel.Children.Add($nameBlock)
+
+    $valueBlock = New-Object Windows.Controls.TextBlock
+    $valueBlock.Text = $entry.Value
+    $valueBlock.FontSize = 15
+    $valueBlock.Foreground = '#0F6CBD'
+    $valueBlock.TextWrapping = 'Wrap'
+    $valueBlock.Margin = '8,0,0,8'
+    [void]$panel.Children.Add($valueBlock)
+}
+
+function Add-ConfigProfileViewConditionalAccessSection
+{
+    param(
+        $panel,
+        [string]$Title,
+        [string]$Summary,
+        $Entries
+    )
+
+    Add-ConfigProfileViewSeparator $panel
+
+    $titleBlock = New-Object Windows.Controls.TextBlock
+    $titleBlock.Text = $Title
+    $titleBlock.FontSize = 14
+    $titleBlock.Margin = '0,0,0,4'
+    [void]$panel.Children.Add($titleBlock)
+
+    if($Summary)
+    {
+        $summaryBlock = New-Object Windows.Controls.TextBlock
+        $summaryBlock.Text = $Summary
+        $summaryBlock.FontSize = 15
+        $summaryBlock.Foreground = '#0F6CBD'
+        $summaryBlock.TextWrapping = 'Wrap'
+        $summaryBlock.Margin = '8,0,0,8'
+        [void]$panel.Children.Add($summaryBlock)
+    }
+
+    $currentSubCategory = $null
+    foreach($entry in @($Entries))
+    {
+        if($entry.SubCategory -and $entry.SubCategory -ne $currentSubCategory)
+        {
+            $subTitleBlock = New-Object Windows.Controls.TextBlock
+            $subTitleBlock.Text = $entry.SubCategory
+            $subTitleBlock.FontSize = 13
+            $subTitleBlock.FontWeight = 'SemiBold'
+            $subTitleBlock.Margin = '0,2,0,6'
+            [void]$panel.Children.Add($subTitleBlock)
+            $currentSubCategory = $entry.SubCategory
+        }
+
+        Add-ConfigProfileViewConditionalAccessEntryBlock -panel $panel -entry $entry
+    }
+}
+
+function Get-ConfigProfileViewConditionalAccessAssignmentsSummary
+{
+    param($obj)
+
+    if(@($obj.conditions.users.includeUsers | Where-Object { $_ -eq 'All' }).Count -gt 0)
+    {
+        return 'All users'
+    }
+
+    if(
+        @($obj.conditions.users.includeUsers).Count -gt 0 -or
+        @($obj.conditions.users.includeGroups).Count -gt 0 -or
+        @($obj.conditions.users.includeRoles).Count -gt 0
+    )
+    {
+        return 'Specific users included'
+    }
+
+    'Not configured'
+}
+
+function Get-ConfigProfileViewConditionalAccessResourcesSummary
+{
+    param($obj)
+
+    if(@($obj.conditions.applications.includeApplications | Where-Object { $_ -eq 'All' }).Count -gt 0)
+    {
+        return "All resources (formerly 'All cloud apps')"
+    }
+
+    if(
+        @($obj.conditions.applications.includeApplications).Count -gt 0 -or
+        @($obj.conditions.applications.includeUserActions).Count -gt 0 -or
+        @($obj.conditions.applications.includeAuthenticationContextClassReferences).Count -gt 0
+    )
+    {
+        return 'Specific target resources selected'
+    }
+
+    'Not configured'
+}
+
+function Get-ConfigProfileViewConditionalAccessNetworkSummary
+{
+    param($obj)
+
+    $includeLocations = @($obj.conditions.locations.includeLocations)
+    $excludeLocations = @($obj.conditions.locations.excludeLocations)
+
+    if(($includeLocations -contains 'All') -and ($excludeLocations -contains 'AllTrusted'))
+    {
+        return 'Any network or location and all trusted locations excluded'
+    }
+
+    if($includeLocations.Count -gt 0 -or $excludeLocations.Count -gt 0)
+    {
+        return 'Specific network locations selected'
+    }
+
+    'Any network or location'
+}
+
+function Get-ConfigProfileViewConditionalAccessConditionsSummary
+{
+    param($obj)
+
+    $selectedConditions = 0
+    if(@($obj.conditions.userRiskLevels).Count -gt 0) { $selectedConditions++ }
+    if(@($obj.conditions.signInRiskLevels).Count -gt 0) { $selectedConditions++ }
+    if(@($obj.conditions.platforms.includePlatforms).Count -gt 0 -or @($obj.conditions.platforms.excludePlatforms).Count -gt 0) { $selectedConditions++ }
+    if(@($obj.conditions.clientAppTypes).Count -gt 0) { $selectedConditions++ }
+    if($obj.conditions.devices.deviceFilter -and $obj.conditions.devices.deviceFilter.rule) { $selectedConditions++ }
+    if(@($obj.conditions.devices.includeDevices).Count -gt 0 -or @($obj.conditions.devices.excludeDevices).Count -gt 0) { $selectedConditions++ }
+
+    if($selectedConditions -eq 0)
+    {
+        return 'No extra conditions selected'
+    }
+
+    if($selectedConditions -eq 1)
+    {
+        return '1 condition selected'
+    }
+
+    "$selectedConditions conditions selected"
+}
+
+function Get-ConfigProfileViewConditionalAccessGrantSummary
+{
+    param($obj)
+
+    $controlCount = @($obj.grantControls.builtInControls).Count
+    $controlCount += @($obj.grantControls.termsOfUse).Count
+    if($obj.grantControls.authenticationStrength) { $controlCount++ }
+    $controlCount += @($obj.grantControls.customAuthenticationFactors).Count
+
+    if($controlCount -eq 0)
+    {
+        return 'No grant controls selected'
+    }
+
+    if($controlCount -eq 1)
+    {
+        return '1 control selected'
+    }
+
+    "$controlCount controls selected"
+}
+
+function Get-ConfigProfileViewConditionalAccessSessionSummary
+{
+    param($obj)
+
+    $controlCount = 0
+    if($obj.sessionControls.applicationEnforcedRestrictions.isEnabled -eq $true) { $controlCount++ }
+    if($obj.sessionControls.cloudAppSecurity.isEnabled -eq $true) { $controlCount++ }
+    if($obj.sessionControls.signInFrequency.isEnabled -eq $true) { $controlCount++ }
+    if($obj.sessionControls.continuousAccessEvaluation) { $controlCount++ }
+    if($obj.sessionControls.persistentBrowser.isEnabled -eq $true) { $controlCount++ }
+
+    if($controlCount -eq 0)
+    {
+        return 'No session controls selected'
+    }
+
+    if($controlCount -eq 1)
+    {
+        return '1 control selected'
+    }
+
+    "$controlCount controls selected"
+}
+
+function Set-ConfigProfileViewConditionalAccessSummary
+{
+    param(
+        $tabItem,
+        $obj
+    )
+
+    $panel = $tabItem.FindName('pnlConfigProfileView')
+    $intro = $tabItem.FindName('txtConfigProfileViewIntro')
+    $scriptHost = $tabItem.FindName('grdConfigProfileScriptHost')
+    if(-not $panel)
+    {
+        return
+    }
+
+    if($scriptHost)
+    {
+        $scriptHost.Visibility = 'Collapsed'
+    }
+
+    if($intro)
+    {
+        $intro.Visibility = 'Collapsed'
+        $intro.Text = ''
+    }
+
+    while($panel.Children.Count -gt 1)
+    {
+        $panel.Children.RemoveAt(1)
+    }
+
+    $nameLabel = New-Object Windows.Controls.TextBlock
+    $nameLabel.Text = 'Name'
+    $nameLabel.FontSize = 14
+    $nameLabel.Margin = '0,0,0,4'
+    [void]$panel.Children.Add($nameLabel)
+
+    $nameBox = New-Object Windows.Controls.TextBox
+    $nameBox.IsReadOnly = $true
+    $nameBox.Text = ?? $obj.displayName ''
+    $nameBox.Margin = '0,0,0,10'
+    $nameBox.MaxWidth = 420
+    [void]$panel.Children.Add($nameBox)
+
+    $entries = @(Get-ConfigProfileViewEntriesForConditionalAccess $obj)
+
+    Add-ConfigProfileViewConditionalAccessSection -panel $panel -Title 'Assignments' -Summary (Get-ConfigProfileViewConditionalAccessAssignmentsSummary $obj) -Entries @($entries | Where-Object Category -eq 'Assignments')
+    Add-ConfigProfileViewConditionalAccessSection -panel $panel -Title 'Target resources' -Summary (Get-ConfigProfileViewConditionalAccessResourcesSummary $obj) -Entries @($entries | Where-Object Category -eq 'Target resources')
+    Add-ConfigProfileViewConditionalAccessSection -panel $panel -Title 'Network' -Summary (Get-ConfigProfileViewConditionalAccessNetworkSummary $obj) -Entries @($entries | Where-Object Category -eq 'Network')
+    Add-ConfigProfileViewConditionalAccessSection -panel $panel -Title 'Conditions' -Summary (Get-ConfigProfileViewConditionalAccessConditionsSummary $obj) -Entries @($entries | Where-Object Category -eq 'Conditions')
+    Add-ConfigProfileViewConditionalAccessSection -panel $panel -Title 'Grant' -Summary (Get-ConfigProfileViewConditionalAccessGrantSummary $obj) -Entries @($entries | Where-Object { $_.Category -eq 'Access controls' -and $_.SubCategory -eq 'Grant' })
+    Add-ConfigProfileViewConditionalAccessSection -panel $panel -Title 'Session' -Summary (Get-ConfigProfileViewConditionalAccessSessionSummary $obj) -Entries @($entries | Where-Object { $_.Category -eq 'Access controls' -and $_.SubCategory -eq 'Session' })
+
+    Add-ConfigProfileViewSeparator $panel
+}
+
 function Get-ConfigProfileViewEntries
 {
     param($selectedItem, $objectType)
@@ -473,6 +1180,7 @@ function Get-ConfigProfileViewEntries
         'DeviceConfiguration' { return @(Get-ConfigProfileViewEntriesForDeviceConfiguration $obj) }
         'SettingsCatalog' { return @(Get-ConfigProfileViewEntriesForSettingsCatalog $obj) }
         'AdministrativeTemplates' { return @(Get-ConfigProfileViewEntriesForAdministrativeTemplates $obj) }
+        'ConditionalAccess' { return @(Get-ConfigProfileViewEntriesForConditionalAccess $obj) }
     }
 
     @()
@@ -653,6 +1361,11 @@ function Invoke-AfterGraphObjectDetailsCreated
         {
             $fullObj = Get-ConfigProfileViewFullObject -selectedItem $selectedItem -objectType $objectType
             Set-ConfigProfileViewScriptContent -tabItem $configTab -scriptText (Get-ConfigProfileViewScriptContent $fullObj)
+        }
+        elseif($objectType.Id -eq 'ConditionalAccess')
+        {
+            $fullObj = Get-ConfigProfileViewFullObject -selectedItem $selectedItem -objectType $objectType
+            Set-ConfigProfileViewConditionalAccessSummary -tabItem $configTab -obj $fullObj
         }
         else
         {
