@@ -502,14 +502,28 @@ function Set-ConfigProfileAssignmentInfo
 
 function Remove-ConfigProfileAssignmentEntry
 {
-    param($entry)
+    param(
+        $entry,
+        [switch]$SkipConfirmation
+    )
 
     if(-not $entry) { return }
     if($null -eq $script:ConfigProfileAssignmentEntries) { return }
 
+    if($SkipConfirmation -ne $true)
+    {
+        $message = "Do you want to remove this assignment?`n`nTarget:`n$($entry.DisplayName)`n`nType: $($entry.TargetType)`nMode: $($entry.TargetMode)"
+        if(([System.Windows.MessageBox]::Show($message, "Remove assignment?", "YesNo", "Warning")) -ne "Yes")
+        {
+            Set-ConfigProfileAssignmentInfo "Removal canceled for '$($entry.DisplayName)'."
+            return $false
+        }
+    }
+
     [void]$script:ConfigProfileAssignmentEntries.Remove($entry)
     Sync-ConfigProfileAssignmentLists
     Set-ConfigProfileAssignmentInfo "Removed '$($entry.DisplayName)'. Included: $($script:ConfigProfileAssignmentIncludeEntries.Count), Excluded: $($script:ConfigProfileAssignmentExcludeEntries.Count)."
+    return $true
 }
 
 function New-ConfigProfileAssignmentEntry
@@ -885,16 +899,20 @@ function Initialize-ConfigProfileAssignmentsForm
         $selectedAssignment = Get-XamlProperty $script:ConfigProfileAssignmentTab "dgProfileAssignmentsInclude" "SelectedItem"
         Write-Log "Assignments UI: remove include clicked. Selected '$($selectedAssignment.DisplayName)'"
         if(-not $selectedAssignment) { return }
-        Remove-ConfigProfileAssignmentEntry $selectedAssignment
-        Invoke-ConfigProfileAssignmentAutoSave "Remove include"
+        if((Remove-ConfigProfileAssignmentEntry $selectedAssignment) -eq $true)
+        {
+            Invoke-ConfigProfileAssignmentAutoSave "Remove include"
+        }
     })
 
     Add-XamlEvent $root "btnAssignmentRemoveExclude" "Add_Click" ({
         $selectedAssignment = Get-XamlProperty $script:ConfigProfileAssignmentTab "dgProfileAssignmentsExclude" "SelectedItem"
         Write-Log "Assignments UI: remove exclude clicked. Selected '$($selectedAssignment.DisplayName)'"
         if(-not $selectedAssignment) { return }
-        Remove-ConfigProfileAssignmentEntry $selectedAssignment
-        Invoke-ConfigProfileAssignmentAutoSave "Remove exclude"
+        if((Remove-ConfigProfileAssignmentEntry $selectedAssignment) -eq $true)
+        {
+            Invoke-ConfigProfileAssignmentAutoSave "Remove exclude"
+        }
     })
 
     Add-XamlEvent $root "btnAssignmentSave" "Add_Click" ({

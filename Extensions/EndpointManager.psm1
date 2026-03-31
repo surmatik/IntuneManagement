@@ -935,7 +935,9 @@ function Invoke-GraphAuthenticationUpdated
 function Set-EMUIStatus
 {
     # Hide/Show Delete button
-    $allowDelete = Get-SettingValue "EMAllowDelete"    
+    $allowDelete = Get-SettingValue "EMAllowDelete"
+    if($global:currentViewObject -and $global:currentViewObject.ViewInfo.AllowDelete -eq $false) { $allowDelete = $false }
+    if($global:curObjectType -and (Test-GraphObjectActionVisible $global:curObjectType "Delete") -ne $true) { $allowDelete = $false }
     $global:btnDelete.Visibility = (?: ($allowDelete -eq $true) "Visible" "Collapsed")
 
     # Hide/Show Delete on Bulk menu
@@ -994,6 +996,8 @@ function Set-EMViewPanel
     Invoke-FilterBoxChanged ($panel.FindName("txtFilter"))
 
     $allowDelete = Get-SettingValue "EMAllowDelete"
+    if($global:currentViewObject -and $global:currentViewObject.ViewInfo.AllowDelete -eq $false) { $allowDelete = $false }
+    if($global:curObjectType -and (Test-GraphObjectActionVisible $global:curObjectType "Delete") -ne $true) { $allowDelete = $false }
     Set-XamlProperty $panel "btnDelete" "Visibility" (?: ($allowDelete -eq $true) "Visible" "Collapsed")    
 
     $global:dgObjects.add_selectionChanged({        

@@ -257,7 +257,7 @@ function Invoke-InitializeModule
         Title = "Show Delete button"
         Key = "EMAllowDelete"
         Type = "Boolean"
-        DefaultValue = $false
+        DefaultValue = $true
         Description = "Allow deleting individual objectes"
     }) "GraphGeneral"
 
@@ -340,6 +340,19 @@ function Get-GraphAppInfo
     }
 
     $appObj
+}
+
+function Test-GraphObjectActionVisible
+{
+    param(
+        $ObjectType,
+        [string]$ActionName
+    )
+
+    if(-not $ObjectType) { return $false }
+    if(-not $ObjectType.ShowButtons) { return $true }
+
+    @($ObjectType.ShowButtons) -contains $ActionName
 }
 
 function Invoke-GraphAuthenticationUpdated
@@ -961,6 +974,7 @@ function Show-GraphObjects
         {
             $allowDelete = Get-SettingValue "EMAllowDelete"
             if($global:currentViewObject.ViewInfo.AllowDelete -eq $false) { $allowDelete = $false }
+            if((Test-GraphObjectActionVisible $global:curObjectType "Delete") -ne $true) { $allowDelete = $false }
             $ctrl.Visibility = (?: ($allowDelete -eq $true) "Visible" "Collapsed")
         }
         elseif(-not $global:curObjectType.ShowButtons -or ($global:curObjectType.ShowButtons | Where-Object { $ctrl.Name -like "*$($_)" } ))

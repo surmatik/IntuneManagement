@@ -1,11 +1,12 @@
 # IntuneManagement - Custom Extensions in This Fork
 
-This fork adds four custom organization-specific extensions on top of the original project:
+This fork adds custom organization-specific extensions on top of the original project:
 
-* **Configuration Profile Assignments Editor**: Adds a dedicated Assignments dialog for Settings Catalog, Device Configuration and Administrative Templates so assignments can be viewed and updated directly from the app.
+* **Configuration Profile Assignments Editor**: Adds a dedicated Assignments dialog for Settings Catalog, Device Configuration and Administrative Templates so assignments can be viewed, updated and removed directly from the app. Removing an assignment now requires an explicit confirmation.
 * **Configuration Profile View**: Adds a readable default View tab for Settings Catalog, Device Configuration, Administrative Templates, PowerShell Scripts and Conditional Access so configured content can be inspected without reading raw JSON.
 * **Menu Favorites**: Adds persistent favorites in the left navigation so frequently used areas can be pinned and shown in a separate favorites section.
 * **Menu Search**: Adds a search box for the left navigation to quickly find menu entries while keeping favorites visible.
+* **Confirmed Delete Actions**: Enables the standard Delete action in supported Intune Manager views by default. Deleting objects still requires confirmation, and read-only or restricted views remain excluded.
 
 # IntuneManagement with PowerShell and WPF UI
 
