@@ -864,25 +864,32 @@ function Show-GraphObjects
 
     $params = @{}
     $pageSize = 0
-    $tmpPageSize = Get-SettingValue "GraphPageSize"
-    if ($tmpPageSize -eq "All")
+    if($global:curObjectType.LoadAllPages -eq $true)
     {
-        $params.Add("AllPages", $true)        
-    }else
+        $params.Add("AllPages", $true)
+    }
+    else
     {
-        
-        if($tmpPageSize) {
-            try {
-                $pageSize = [int]$tmpPageSize
-            }
-            catch {}
-        }
-
-        if($pageSize -gt 0)
+        $tmpPageSize = Get-SettingValue "GraphPageSize"
+        if ($tmpPageSize -eq "All")
         {
-            $params.Add("PageSize", $pageSize)
-        }        
-        $params.Add("SinglePage", $true)
+            $params.Add("AllPages", $true)        
+        }else
+        {
+            
+            if($tmpPageSize) {
+                try {
+                    $pageSize = [int]$tmpPageSize
+                }
+                catch {}
+            }
+
+            if($pageSize -gt 0)
+            {
+                $params.Add("PageSize", $pageSize)
+            }        
+            $params.Add("SinglePage", $true)
+        }
     }
 
     [array]$graphObjects = Get-GraphObjects -property $global:curObjectType.ViewProperties -objectType $global:curObjectType -Filter $filter @params
@@ -994,6 +1001,15 @@ function Show-GraphObjects
 
 function Set-GraphPagesButtonStatus
 {
+    if($global:curObjectType.LoadAllPages -eq $true)
+    {
+        $global:btnLoadAllPages.Visibility = "Collapsed"
+        $global:btnLoadNextPage.Visibility = "Collapsed"
+        $global:btnLoadAllPages.Tag = $null
+        $global:btnLoadNextPage.Tag = $null
+        return
+    }
+
     $global:btnLoadAllPages.Visibility = (?: ($script:nextGraphPage) "Visible" "Collapsed")
     $global:btnLoadNextPage.Visibility = (?: ($script:nextGraphPage) "Visible" "Collapsed")
     $global:btnLoadAllPages.Tag = $script:nextGraphPage

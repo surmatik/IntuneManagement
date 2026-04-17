@@ -7,6 +7,10 @@ Purpose:
 Current customizations:
 - Menu search box
 - Persistent menu favorites
+- Menu grouping by solution area
+- Configuration profile view
+- Configuration profile assignments editor
+- Tenant analytics for passkey / FIDO registration
 
 Structure:
 - `Custom\Extensions\*.psm1`: custom PowerShell modules, auto-imported after the standard modules
@@ -15,6 +19,10 @@ Structure:
 Current modules:
 - `Custom\Extensions\MenuSearch.Custom.psm1`
 - `Custom\Extensions\MenuFavorites.Custom.psm1`
+- `Custom\Extensions\MenuGroups.Custom.psm1`
+- `Custom\Extensions\ConfigProfileView.Custom.psm1`
+- `Custom\Extensions\ConfigProfileAssignments.Custom.psm1`
+- `Custom\Extensions\TenantAnalytics.Custom.psm1`
 
 Update workflow:
 1. Update the upstream project files as usual.

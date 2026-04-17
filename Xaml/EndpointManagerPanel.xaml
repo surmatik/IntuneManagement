@@ -2,6 +2,7 @@
     <Grid Name="grdData">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
@@ -13,14 +14,14 @@
             SelectionMode="Single"
             SelectionUnit="FullRow"
             CanUserAddRows="False"
-            Grid.Column="1"
-            Grid.Row="1">
+            Grid.Column="0"
+            Grid.Row="2">
             <DataGrid.Resources>
                 <Style TargetType="{x:Type TextBlock}">
                     <Setter Property="TextWrapping" Value="NoWrap"/>
                 </Style>
             </DataGrid.Resources> 
-        </DataGrid>       
+        </DataGrid>
 
         <Grid Name="grdTitle" Visibility="Collapsed" >
             <Grid.ColumnDefinitions>
@@ -35,21 +36,57 @@
             <Border Background="{DynamicResource TitleBackgroundColor}" Margin="0,0,0,5" >
                 <ContentControl Name="ccIcon" Width="24" Height="24" Margin="5,0,0,0" />
             </Border>
-            <TextBlock Name="txtFormTitle" Text="" Grid.Column="1" Grid.ColumnSpan="5" FontWeight="Bold" Padding="5" Margin="0,0,0,5" Background="{DynamicResource TitleBackgroundColor}" />
+            <TextBlock Name="txtFormTitle" Text="" Grid.Column="0" Grid.ColumnSpan="5" FontWeight="Bold" Padding="5" Margin="0,0,0,5" Background="{DynamicResource TitleBackgroundColor}" />
             <Button Name="btnLoadAllPages" Grid.Column="2" Content="Load All" Width='100' Margin="0,5,5,7" Visibility="Collapsed" />
             <Button Name="btnLoadNextPage" Grid.Column="3" Content="Load More" Width='100' Margin="0,5,5,7" Visibility="Collapsed" />
             <TextBox Name="txtFilter" Grid.Column="4" MinWidth="200" MaxHeight="20" Margin="0,0,5,3" />
-<!--    
-            <Grid Grid.Column="2" MinWidth="200" MaxHeight="20">
-                <TextBlock Text="Filter" Background="White" />
-                <TextBox Name="txtFilter" Grid.Column="2" MinWidth="200" MaxHeight="20" Margin="0,0,5,3" Background="Transparent" />
-            </Grid> 
--->        
         </Grid>
 
-        <Grid Name="grdObject" Grid.Row="1" Grid.RowSpan="2" Visibility="Collapsed" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="White" Margin="0,0,0,0" />
+        <Border Name="brdPasskeySummary" Grid.Row="1" Visibility="Collapsed" Margin="0,0,0,8" Padding="10" CornerRadius="10" BorderThickness="1" BorderBrush="#D7E1EA" Background="#F7FAFC">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
 
-        <Grid Grid.Row="2" >
+                <UniformGrid Rows="1" Columns="4" Margin="0,0,0,10">
+                    <Border Margin="0,0,8,0" Padding="12" CornerRadius="8" Background="#FFFFFF" BorderBrush="#D7E1EA" BorderThickness="1">
+                        <StackPanel>
+                            <TextBlock Text="Users" FontSize="12" Foreground="#52606D" />
+                            <TextBlock Name="txtPasskeySummaryTotalValue" Text="0" FontSize="22" FontWeight="Bold" Foreground="#102A43" />
+                        </StackPanel>
+                    </Border>
+                    <Border Margin="0,0,8,0" Padding="12" CornerRadius="8" Background="#ECFDF5" BorderBrush="#B7E4C7" BorderThickness="1">
+                        <StackPanel>
+                            <TextBlock Text="Configured" FontSize="12" Foreground="#2D6A4F" />
+                            <TextBlock Name="txtPasskeySummaryConfiguredValue" Text="0" FontSize="22" FontWeight="Bold" Foreground="#1B4332" />
+                        </StackPanel>
+                    </Border>
+                    <Border Margin="0,0,8,0" Padding="12" CornerRadius="8" Background="#FFF7ED" BorderBrush="#F4C7A1" BorderThickness="1">
+                        <StackPanel>
+                            <TextBlock Text="Missing" FontSize="12" Foreground="#9A3412" />
+                            <TextBlock Name="txtPasskeySummaryMissingValue" Text="0" FontSize="22" FontWeight="Bold" Foreground="#7C2D12" />
+                        </StackPanel>
+                    </Border>
+                    <Border Padding="12" CornerRadius="8" Background="#EFF6FF" BorderBrush="#BFD7FF" BorderThickness="1">
+                        <StackPanel>
+                            <TextBlock Text="Coverage" FontSize="12" Foreground="#1D4ED8" />
+                            <TextBlock Name="txtPasskeySummaryCoverageValue" Text="0.0%" FontSize="22" FontWeight="Bold" Foreground="#1E3A8A" />
+                        </StackPanel>
+                    </Border>
+                </UniformGrid>
+
+                <StackPanel Grid.Row="1">
+                    <TextBlock Name="txtPasskeySummaryText" Text="0 of 0 users have Passkey or FIDO configured" FontWeight="SemiBold" Foreground="#102A43" Margin="0,0,0,6" />
+                    <ProgressBar Name="pbPasskeySummaryCoverage" Height="10" Maximum="100" Value="0" Foreground="#2F855A" Background="#D9E2EC" />
+                    <CheckBox Name="chkPasskeyHideWithoutLicense" Content="Hide users without license" Margin="0,8,0,0" Foreground="#334E68" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <Grid Name="grdObject" Grid.Row="2" Grid.RowSpan="2" Visibility="Collapsed" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="White" Margin="0,0,0,0" />
+
+        <Grid Grid.Row="3" >
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="*"/>
@@ -57,7 +94,7 @@
 
             <TextBlock Name="txtEMObjects" />
 
-            <StackPanel Grid.Column="1" Name="spSubMenu" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,5,0,0" >
+            <StackPanel Grid.Column="0" Name="spSubMenu" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,5,0,0" >
                 <Button Name="btnView" Content="View" MinWidth="100" Margin="0,0,5,0" IsEnabled="False" ToolTip="Veiw the json data of an item" />
                 <Button Name="btnCopy" Content="Copy" MinWidth="100" Margin="0,0,5,0" IsEnabled="False" ToolTip="Clone the selected item"/>
                 <Button Name="btnDelete" Content="Delete" MinWidth="100" Margin="0,0,5,0" IsEnabled="False" ToolTip="Delete selected item(s)"/>

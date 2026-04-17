@@ -19,8 +19,6 @@ function Set-MenuItemFavoriteState
 {
     param($viewItem, [bool]$isFavorite)
 
-    $menuGroupTitle = if($isFavorite) { "Favoriten" } else { "Alle Menupunkte" }
-
     if(($viewItem | Get-Member -MemberType NoteProperty -Name "IsFavorite"))
     {
         $viewItem.IsFavorite = $isFavorite
@@ -28,15 +26,6 @@ function Set-MenuItemFavoriteState
     else
     {
         $viewItem | Add-Member -NotePropertyName "IsFavorite" -NotePropertyValue $isFavorite
-    }
-
-    if(($viewItem | Get-Member -MemberType NoteProperty -Name "MenuGroupTitle"))
-    {
-        $viewItem.MenuGroupTitle = $menuGroupTitle
-    }
-    else
-    {
-        $viewItem | Add-Member -NotePropertyName "MenuGroupTitle" -NotePropertyValue $menuGroupTitle
     }
 }
 

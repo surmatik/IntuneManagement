@@ -6,7 +6,9 @@ This fork adds custom organization-specific extensions on top of the original pr
 * **Configuration Profile View**: Adds a readable default View tab for Settings Catalog, Device Configuration, Administrative Templates, PowerShell Scripts and Conditional Access so configured content can be inspected without reading raw JSON.
 * **Menu Favorites**: Adds persistent favorites in the left navigation so frequently used areas can be pinned and shown in a separate favorites section.
 * **Menu Search**: Adds a search box for the left navigation to quickly find menu entries while keeping favorites visible.
+* **Menu Groups**: Groups the left navigation into areas such as Analytics, Configuration, Security, Updates and Tenant to make larger menus easier to scan.
 * **Confirmed Delete Actions**: Enables the standard Delete action in supported Intune Manager views by default. Deleting objects still requires confirmation, and read-only or restricted views remain excluded.
+* **Tenant Analytics**: Adds a `Passkey Report` entry for tenant-wide user passkey and FIDO registration status, including which users have one configured and which do not.
 
 # IntuneManagement with PowerShell and WPF UI
 

@@ -751,7 +751,7 @@ function Invoke-InitializeModule
         PostExportCommand = { Start-PostExportDeviceHealthScripts  @args }
         ExportExtension = { Add-ScriptExportExtensions @args }
         Permissons=@("DeviceManagementScripts.ReadWrite.All")
-        GroupId = "EndpointAnalytics"
+        GroupId = "Scripts"
         Icon = "Report"
         AssignmentsType = "deviceHealthScriptAssignments"
         AssignmentProperties = @("target","runSchedule","runRemediationScript")
