@@ -1401,7 +1401,7 @@ function Add-CDDocumentCustomProfileProperty
     }    
     elseif($obj.'@OData.Type' -like "#microsoft.graph.windowsWifiConfiguration")
     {
-        if($obj.wifiSecurityType -eq "wpa2Personal")
+        if($obj.wifiSecurityType -eq "wpa2Personal" -and $global:ConfigProfileViewIncludeSecrets -ne $true)
         {
             $obj.preSharedKey = "********"
         }

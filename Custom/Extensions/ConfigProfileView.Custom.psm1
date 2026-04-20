@@ -156,9 +156,15 @@ function Get-ConfigProfileViewFullObject
 
 function Get-ConfigProfileViewEntriesForDeviceConfiguration
 {
-    param($obj)
+    param($obj, $objectType)
 
     $entries = @()
+    $documentationEntries = @(Get-ConfigProfileViewEntriesFromDocumentation -obj $obj -objectType $objectType)
+    if($documentationEntries.Count -gt 0)
+    {
+        return $documentationEntries
+    }
+
     if(@($obj.omaSettings).Count -gt 0)
     {
         foreach($setting in @($obj.omaSettings))
@@ -179,15 +185,18 @@ function Get-ConfigProfileViewEntriesForDeviceConfiguration
     $ignoreProperties = @(
         "@odata.context", "@odata.type", "@odata.id", "@odata.editLink", "id", "displayName", "description",
         "createdDateTime", "lastModifiedDateTime", "version", "roleScopeTagIds", "supportsScopeTags",
-        "assignments", "Assignments"
+        "assignments", "Assignments", "deviceStatuses", "deviceStatusOverview", "deviceSettingStateSummaries",
+        "groupAssignments", "userStatuses", "userStatusOverview"
     )
 
-    foreach($prop in ($obj.PSObject.Properties | Where-Object MemberType -eq NoteProperty))
+    foreach($prop in @($obj.PSObject.Properties | Where-Object {
+        $_.MemberType -notin @('Method', 'CodeMethod', 'ScriptMethod', 'ParameterizedProperty')
+    }))
     {
         if($ignoreProperties -contains $prop.Name) { continue }
         if($prop.Name -like "@*" -or $prop.Name -like "#*") { continue }
+        if($prop.Name -like "*@odata.*") { continue }
         if($null -eq $prop.Value) { continue }
-        if($prop.Value -isnot [string] -and $prop.Value -isnot [ValueType] -and $prop.Value -isnot [Array]) { continue }
 
         $entries += (New-ConfigProfileViewEntry `
             -Category "Configuration settings" `
@@ -197,6 +206,76 @@ function Get-ConfigProfileViewEntriesForDeviceConfiguration
     }
 
     $entries
+}
+
+function Get-ConfigProfileViewEntriesFromDocumentation
+{
+    param($obj, $objectType)
+
+    if(-not $obj -or -not $objectType)
+    {
+        return @()
+    }
+
+    if(-not (Get-Command Get-ObjectDocumentation -ErrorAction SilentlyContinue))
+    {
+        return @()
+    }
+
+    try
+    {
+        $global:ConfigProfileViewIncludeSecrets = $true
+
+        if(Get-Command Invoke-InitDocumentation -ErrorAction SilentlyContinue)
+        {
+            Invoke-InitDocumentation
+        }
+
+        $documentation = Get-ObjectDocumentation ([PSCustomObject]@{
+            Object = $obj
+            ObjectType = $objectType
+        })
+
+        $entries = @()
+        foreach($setting in @($documentation.Settings))
+        {
+            if(-not $setting -or -not $setting.Name) { continue }
+
+            $value = ConvertTo-ConfigProfileViewString $setting.Value
+            $isWifiPsk = $setting.EntityKey -eq 'preSharedKey'
+            if([string]::IsNullOrWhiteSpace($value))
+            {
+                if($isWifiPsk)
+                {
+                    $value = "Not returned by Microsoft Graph for existing Wi-Fi profiles"
+                }
+                elseif($setting.AlwaysAddValue -ne $true)
+                {
+                    continue
+                }
+            }
+
+            $entries += (New-ConfigProfileViewEntry `
+                -Category (?? $setting.Category "Configuration settings") `
+                -SubCategory (?? $setting.SubCategory "") `
+                -Name $setting.Name `
+                -Value $value `
+                -Description (?? $setting.Description "") `
+                -Level (?? $setting.Level 0))
+        }
+
+        $entries
+    }
+    catch
+    {
+        Write-Log "Config profile view: failed to build documentation-based entries for $($objectType.Id) / $($obj.id). $($_.Exception.Message)" 2
+        @()
+    }
+    finally
+    {
+        $global:ConfigProfileViewIncludeSecrets = $false
+        Write-Status ""
+    }
 }
 
 function Get-ConfigProfileViewSettingCatalogDefinition
@@ -1177,7 +1256,7 @@ function Get-ConfigProfileViewEntries
 
     switch ($objectType.Id)
     {
-        'DeviceConfiguration' { return @(Get-ConfigProfileViewEntriesForDeviceConfiguration $obj) }
+        'DeviceConfiguration' { return @(Get-ConfigProfileViewEntriesForDeviceConfiguration -obj $obj -objectType $objectType) }
         'SettingsCatalog' { return @(Get-ConfigProfileViewEntriesForSettingsCatalog $obj) }
         'AdministrativeTemplates' { return @(Get-ConfigProfileViewEntriesForAdministrativeTemplates $obj) }
         'ConditionalAccess' { return @(Get-ConfigProfileViewEntriesForConditionalAccess $obj) }
