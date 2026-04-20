@@ -4156,6 +4156,73 @@ function Add-ConditionalAccessImportExtensions
     @($label, $global:cbImportCAState)
 }
 
+function Remove-ConditionalAccessImportNoise
+{
+    param($Node)
+
+    if(-not $Node -or -not $Node.PSObject) { return }
+
+    foreach($prop in @($Node.PSObject.Properties))
+    {
+        $name = $prop.Name
+        $value = $prop.Value
+
+        if($name -eq '@odata.type' -or $name -like '#microsoft.graph.*' -or $name -like '*@odata.context' -or $name -like '*@odata.id' -or $name -like '*@odata.associationLink' -or $name -like '*@odata.navigationLink')
+        {
+            $Node.PSObject.Properties.Remove($name)
+            continue
+        }
+
+        if($null -eq $value)
+        {
+            $Node.PSObject.Properties.Remove($name)
+            continue
+        }
+
+        if($value -is [array])
+        {
+            $clean = @()
+            foreach($item in @($value))
+            {
+                if($null -eq $item) { continue }
+                if($item -is [string])
+                {
+                    if([string]::IsNullOrWhiteSpace($item)) { continue }
+                    $clean += $item
+                    continue
+                }
+
+                if($item.PSObject)
+                {
+                    Remove-ConditionalAccessImportNoise $item
+                    if(@($item.PSObject.Properties).Count -eq 0) { continue }
+                }
+
+                $clean += $item
+            }
+
+            if($clean.Count -eq 0)
+            {
+                $Node.PSObject.Properties.Remove($name)
+            }
+            else
+            {
+                $Node.$name = @($clean)
+            }
+            continue
+        }
+
+        if($value.PSObject)
+        {
+            Remove-ConditionalAccessImportNoise $value
+            if(@($value.PSObject.Properties).Count -eq 0)
+            {
+                $Node.PSObject.Properties.Remove($name)
+            }
+        }
+    }
+}
+
 function Start-PreImportConditionalAccess
 {
     param($obj, $objectType, $file, $assignments)
@@ -4170,29 +4237,209 @@ function Start-PreImportConditionalAccess
         }
     }
 
-    if($obj.grantControls.authenticationStrength)
+    # Remove top-level properties not accepted in create payload.
+    foreach($propName in @('templateId','deletedDateTime','partialEnablementStrategy'))
     {
-        $obj.grantControls.operator = "AND"
-        $tmpObj = Get-GraphObjectFromFile $file
-
-        $authSetting = [PSCustomObject]@{
-            id = $tmpObj.grantControls.authenticationStrength.id
+        if($obj.PSObject.Properties[$propName])
+        {
+            $obj.PSObject.Properties.Remove($propName)
         }
-        $obj.grantControls.authenticationStrength = $authSetting
     }
 
-    if($obj.sessionControls.disableResilienceDefaults -eq $false)
+    # Normalize guest token format.
+    if($obj.conditions -and $obj.conditions.users)
+    {
+        if(@($obj.conditions.users.includeUsers) -contains 'GuestsOrExternalUsers')
+        {
+            $obj.conditions.users.includeUsers = @($obj.conditions.users.includeUsers | Where-Object { $_ -ne 'GuestsOrExternalUsers' })
+            if(-not $obj.conditions.users.includeGuestsOrExternalUsers)
+            {
+                $obj.conditions.users.includeGuestsOrExternalUsers = [PSCustomObject]@{
+                    guestOrExternalUserTypes = 'b2bCollaborationGuest,b2bCollaborationMember,b2bDirectConnectUser,otherExternalUser,serviceProvider'
+                    externalTenants = [PSCustomObject]@{ membershipKind = 'all' }
+                }
+            }
+        }
+
+        if(@($obj.conditions.users.excludeUsers) -contains 'GuestsOrExternalUsers')
+        {
+            $obj.conditions.users.excludeUsers = @($obj.conditions.users.excludeUsers | Where-Object { $_ -ne 'GuestsOrExternalUsers' })
+            if(-not $obj.conditions.users.excludeGuestsOrExternalUsers)
+            {
+                $obj.conditions.users.excludeGuestsOrExternalUsers = [PSCustomObject]@{
+                    guestOrExternalUserTypes = 'b2bCollaborationGuest,b2bCollaborationMember,b2bDirectConnectUser,otherExternalUser,serviceProvider'
+                    externalTenants = [PSCustomObject]@{ membershipKind = 'all' }
+                }
+            }
+        }
+
+        foreach($guestProp in @('includeGuestsOrExternalUsers','excludeGuestsOrExternalUsers'))
+        {
+            $guestObj = $obj.conditions.users.$guestProp
+            if($guestObj -and $guestObj.guestOrExternalUserTypes)
+            {
+                $types = @("$($guestObj.guestOrExternalUserTypes)" -split ',') | ForEach-Object { "$_".Trim() } | Where-Object { $_ -and $_ -ne 'internalGuest' }
+                $guestObj.guestOrExternalUserTypes = ($types -join ',')
+            }
+        }
+    }
+
+    # Remove named-location GUIDs that cannot be resolved in the target tenant
+    # (common when import is done without dependency migration tables).
+    if($obj.conditions -and $obj.conditions.locations)
+    {
+        $allowedBuiltInLocations = @('All','AllTrusted')
+
+        if($obj.conditions.locations.includeLocations)
+        {
+            $includeLocations = @($obj.conditions.locations.includeLocations)
+            $includeLocations = @($includeLocations | Where-Object { $_ -in $allowedBuiltInLocations })
+            if($includeLocations.Count -eq 0)
+            {
+                $includeLocations = @('All')
+            }
+            $obj.conditions.locations.includeLocations = $includeLocations
+        }
+
+        if($obj.conditions.locations.excludeLocations)
+        {
+            $excludeLocations = @($obj.conditions.locations.excludeLocations)
+            $excludeLocations = @($excludeLocations | Where-Object { $_ -in $allowedBuiltInLocations })
+            if($excludeLocations.Count -eq 0)
+            {
+                $obj.conditions.locations.PSObject.Properties.Remove('excludeLocations')
+            }
+            else
+            {
+                $obj.conditions.locations.excludeLocations = $excludeLocations
+            }
+        }
+    }
+
+    if($obj.grantControls)
+    {
+        foreach($odataAuthProp in @('authenticationStrength@odata.context','authenticationStrength@odata.associationLink','authenticationStrength@odata.navigationLink'))
+        {
+            if($obj.grantControls.PSObject.Properties[$odataAuthProp])
+            {
+                $obj.grantControls.PSObject.Properties.Remove($odataAuthProp)
+            }
+        }
+
+        if($obj.grantControls.PSObject.Properties['authenticationStrength'] -and -not $obj.grantControls.authenticationStrength)
+        {
+            $obj.grantControls.PSObject.Properties.Remove('authenticationStrength')
+        }
+
+        if($obj.grantControls.authenticationStrength)
+        {
+            $obj.grantControls.operator = 'AND'
+            $tmpObj = Get-GraphObjectFromFile $file
+            $authId = $null
+            if($tmpObj -and $tmpObj.grantControls -and $tmpObj.grantControls.authenticationStrength -and $tmpObj.grantControls.authenticationStrength.id)
+            {
+                $authId = "$($tmpObj.grantControls.authenticationStrength.id)"
+            }
+            elseif($obj.grantControls.authenticationStrength.id)
+            {
+                $authId = "$($obj.grantControls.authenticationStrength.id)"
+            }
+            if($authId)
+            {
+                $obj.grantControls.authenticationStrength = [PSCustomObject]@{ id = $authId }
+            }
+            else
+            {
+                $obj.grantControls.PSObject.Properties.Remove('authenticationStrength')
+            }
+
+            if($obj.grantControls.builtInControls)
+            {
+                $obj.grantControls.builtInControls = @($obj.grantControls.builtInControls | Where-Object { "$_" -ne 'mfa' })
+            }
+        }
+    }
+
+    # Sign-in frequency payloads must include value/isEnabled when enabled.
+    # Build a normalized object explicitly so properties survive PS5 object quirks.
+    if($obj.sessionControls -and $obj.sessionControls.signInFrequency)
+    {
+        $tmpObj = Get-GraphObjectFromFile $file
+        $sif = $obj.sessionControls.signInFrequency
+
+        $sifType = "$($sif.type)".Trim()
+        if(-not $sifType) { $sifType = "hours" }
+
+        $sifAuthType = "$($sif.authenticationType)".Trim()
+        if(-not $sifAuthType) { $sifAuthType = "primaryAndSecondaryAuthentication" }
+
+        $sifFrequencyInterval = "$($sif.frequencyInterval)".Trim()
+        if(-not $sifFrequencyInterval) { $sifFrequencyInterval = "timeBased" }
+
+        $sifEnabled = $sif.isEnabled
+        if($null -eq $sifEnabled) { $sifEnabled = $true }
+
+        $sifValue = $sif.value
+        if($null -eq $sifValue -or "$sifValue" -eq "")
+        {
+            if($tmpObj -and $tmpObj.sessionControls -and $tmpObj.sessionControls.signInFrequency -and $tmpObj.sessionControls.signInFrequency.value)
+            {
+                $sifValue = [int]$tmpObj.sessionControls.signInFrequency.value
+            }
+            elseif($sifType -eq "hours")
+            {
+                $sifValue = 4
+            }
+            elseif($sifType -eq "days")
+            {
+                $sifValue = 1
+            }
+        }
+
+        if($null -ne $sifValue -and "$sifValue" -ne "")
+        {
+            $obj.sessionControls.signInFrequency = [PSCustomObject]@{
+                value = [int]$sifValue
+                type = $sifType
+                authenticationType = $sifAuthType
+                frequencyInterval = $sifFrequencyInterval
+                isEnabled = [bool]$sifEnabled
+            }
+        }
+    }
+
+    # DeviceStates property is deprecated (legacy key used mixed casing in exports)
+    foreach($legacyDeviceStatesProp in @('DeviceStates','deviceStates'))
+    {
+        if($obj.conditions -and ($obj.conditions.PSObject.Properties | Where-Object Name -eq $legacyDeviceStatesProp))
+        {
+            $obj.conditions.PSObject.Properties.Remove($legacyDeviceStatesProp)
+        }
+    }
+
+    # Normalize device filter expression literals.
+    if($obj.conditions -and $obj.conditions.devices -and $obj.conditions.devices.deviceFilter -and $obj.conditions.devices.deviceFilter.rule)
+    {
+        $obj.conditions.devices.deviceFilter.rule = ($obj.conditions.devices.deviceFilter.rule -replace '\bTrue\b', 'true' -replace '\bFalse\b', 'false')
+    }
+
+    # For guest/external target policies Graph can reject additional device conditions.
+    if($obj.conditions -and $obj.conditions.users -and ($obj.conditions.users.includeGuestsOrExternalUsers -or $obj.conditions.users.excludeGuestsOrExternalUsers))
+    {
+        if($obj.conditions.PSObject.Properties['devices'])
+        {
+            $obj.conditions.PSObject.Properties.Remove('devices')
+        }
+    }
+
+    if($obj.sessionControls -and $obj.sessionControls.disableResilienceDefaults -eq $false)
     {
         $obj.sessionControls.disableResilienceDefaults = $null
     }
 
-    # DeviceStates property is depricated
-    if(($obj.conditions.PSObject.Properties | Where Name -eq "DeviceStates"))
-    {
-        $obj.conditions.PSObject.Properties.Remove('DeviceStates')
-    }    
+    # Final cleanup of null/empty/metadata props.
+    Remove-ConditionalAccessImportNoise $obj
 }
-
 function Start-PostExportConditionalAccess
 {
     param($obj, $objectType, $path)
@@ -4422,3 +4669,5 @@ function Start-PreImportCommandAuthenticationContext
 
 
 Export-ModuleMember -alias * -function *
+
+

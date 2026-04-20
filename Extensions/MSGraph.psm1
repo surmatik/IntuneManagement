@@ -3854,10 +3854,83 @@ function Import-GraphObject
     if($global:Organization.Id)
     {
         $json = $json -replace "%OrganizationId%",$global:Organization.Id
-    }    
+    }
 
-    $newObj = (Invoke-GraphRequest -Url $strAPI -Content $json -HttpMethod $method @params)
+    # Final CA payload guardrail: enforce required signInFrequency fields on JSON level.
+    if($objectType -and $objectType.Id -eq 'ConditionalAccess' -and $json)
+    {
+        try
+        {
+            # PowerShell 5.1: ConvertFrom-Json does not support -Depth.
+            $caObj = $json | ConvertFrom-Json
+            if($caObj.sessionControls -and $caObj.sessionControls.signInFrequency)
+            {
+                $sif = $caObj.sessionControls.signInFrequency
 
+                if(-not $sif.PSObject.Properties['isEnabled'])
+                {
+                    $sif | Add-Member -MemberType NoteProperty -Name 'isEnabled' -Value $true -Force
+                }
+
+                if(-not $sif.PSObject.Properties['value'])
+                {
+                    $sifType = "$($sif.type)"
+                    if($sifType -eq 'days')
+                    {
+                        $sif | Add-Member -MemberType NoteProperty -Name 'value' -Value 1 -Force
+                    }
+                    else
+                    {
+                        # Default to hours when type is missing/unknown.
+                        if(-not $sifType) { $sif.type = 'hours' }
+                        $sif | Add-Member -MemberType NoteProperty -Name 'value' -Value 4 -Force
+                    }
+                }
+            }
+            $json = ConvertTo-Json $caObj -Depth 50
+        }
+        catch
+        {
+            Write-Log "Conditional Access JSON normalization failed (signInFrequency guardrail): $($_.Exception.Message)" 2
+        }
+    }
+
+        try
+    {
+        $newObj = (Invoke-GraphRequest -Url $strAPI -Content $json -HttpMethod $method @params)
+    }
+    catch
+    {
+        if($objectType -and $objectType.Id -eq 'ConditionalAccess')
+        {
+            Write-Log "Conditional Access import failed for '$((Get-GraphObjectName $obj $objectType))' on API '$strAPI'" 2
+            Write-Log "Conditional Access import payload: $json" 2
+
+            try
+            {
+                if($_.Exception.Response)
+                {
+                    $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
+                    $reader.BaseStream.Position = 0
+                    $reader.DiscardBufferedData()
+                    $responseText = $reader.ReadToEnd()
+                    if($responseText)
+                    {
+                        Write-Log "Conditional Access Graph response: $responseText" 2
+                    }
+                }
+            }
+            catch {}
+        }
+
+        throw
+    }
+
+    if(-not $newObj -and $objectType -and $objectType.Id -eq 'ConditionalAccess')
+    {
+        Write-Log "Conditional Access import returned no object (likely Graph validation error) for '$((Get-GraphObjectName $obj $objectType))'" 2
+        Write-Log "Conditional Access import payload: $json" 2
+    }
     if($newObj -is [Boolean] -and $newObj -and $method -eq "PATCH")
     {
         $newObj = (Get-GraphObject -obj $obj -objectType $objectType -SkipAssignments).Object
@@ -4666,3 +4739,6 @@ function Confirm-GraphMatchFilter
     }
     return $true
 }
+
+
+
