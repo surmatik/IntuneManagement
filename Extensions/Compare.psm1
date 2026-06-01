@@ -553,7 +553,7 @@ function Invoke-BulkCompareNamedObjects
 
     if($compareObjectsResult.Count -eq 0)
     {
-        [System.Windows.MessageBox]::Show("No objects were comparced. Verify name patterns", "Error", "OK", "Error")
+        [System.Windows.MessageBox]::Show("No objects were compared. Verify name patterns", "Error", "OK", "Error")
     }
     elseif($outputType -eq "all")
     {
@@ -966,7 +966,7 @@ function Start-BulkCompareExportIntuneToNamedExportedObjects
     Write-Status ""
     if($compareObjectsResult.Count -eq 0)
     {
-        [System.Windows.MessageBox]::Show("No objects were comparced. Verify folder and exported files", "Error", "OK", "Error")
+        [System.Windows.MessageBox]::Show("No objects were compared. Verify folder and exported files", "Error", "OK", "Error")
     }
 }
 
@@ -1438,7 +1438,7 @@ function Add-CompareProperty
         $compare.Match = $null
     }
 
-    Write-Host "Add property $($compare.PropertyName)"
+    Write-LogDebug "Add property $($compare.PropertyName)"
     $script:compareProperties += $compare
 }
 
